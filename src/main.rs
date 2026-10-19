@@ -1,6 +1,6 @@
 use std::{env, process::ExitCode};
 
-use lane_menu::{cli, lane::Ctx};
+use lane_menu::{cli, lane::Ctx, tui};
 
 fn main() -> ExitCode {
     let ctx = match Ctx::from_env() {
@@ -12,10 +12,7 @@ fn main() -> ExitCode {
     };
     let args: Vec<String> = env::args().skip(1).collect();
     match args.split_first() {
-        None => {
-            eprintln!("usage: lane-menu <verb-or-key> [lane]");
-            ExitCode::from(2)
-        }
+        None => tui::run(ctx),
         Some((word, rest)) => cli::run(&ctx, word, rest),
     }
 }

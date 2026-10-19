@@ -7,6 +7,8 @@ license = "MIT"
 publish = false
 
 [dependencies]
+ratatui = { version = "0.30.2", default-features = false, features = ["layout-cache", "std"] }
+ratcn = { version = "0.0.6", features = ["termina"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 
