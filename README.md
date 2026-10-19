@@ -14,6 +14,8 @@ herdr can already remove a worktree, but it bypasses lane's guard. `lane rm` kee
 herdr plugin install luizbafilho/herdr-lane
 ```
 
+Install builds the menu with `cargo build --release --locked`, so `cargo` must be on your `PATH`. `herdr plugin link` skips build commands, so after linking a checkout, run `cargo build --release` in it yourself.
+
 Bind the menu in `~/.config/herdr/config.toml`:
 
 ```toml
@@ -28,25 +30,29 @@ Then run `herdr server reload-config`.
 
 ## Menu
 
-The popup lists every lane with its branch, state, dirty flag and pending notes. `>` marks the lane you invoked the menu from, and `*` marks a lane that is open in herdr. A command acts on the current lane, or asks for a lane number when you started from the primary checkout.
+The popup lists every lane with its branch, state, dirty flag and pending notes. `>` marks the lane you opened the menu from, and `*` marks a lane that is open in herdr. A panel beside the list shows the selected lane's path, workspace and last five commits. In a narrow popup the panel gives its room to the list.
+
+Move with `j` and `k`, the arrow keys or the mouse. Commands act on the selected lane, which starts on the lane you came from. The key bar dims a command the selected lane cannot take.
 
 | Key | Does |
 | --- | --- |
-| `n` | `lane new <name> [--base REF]`, then opens and focuses the workspace |
-| `o` | opens a lane that has no workspace yet, such as one an agent made with `lane new` |
+| `n` | asks for a name and an optional base ref, runs `lane new`, then opens and focuses the workspace |
+| `o` | opens the selected lane when it has no workspace yet, such as one an agent made with `lane new` |
 | `m` | `lane merge`, then closes the lane's workspace and focuses the repo's |
 | `p` | `lane push`, the workspace stays open |
 | `r` | `lane rm`; if lane refuses, asks before `lane rm --force` |
 | `x` | `lane prune`, then closes workspaces whose worktree is gone |
-| `q`, `Esc` | quit |
+| `q`, `Esc` | quit; `Ctrl+C` quits from anywhere |
 
-When a lane command fails, its output stays on screen until you press Enter.
+`n` and `o` close the popup once the new workspace has focus. The other commands keep it open, refresh the list and confirm with a toast. A spinner shows while a command runs. When one fails, its output opens in a dialog that scrolls with `j` and `k`, and `Enter` or `Esc` closes it.
 
-The same handlers run without the popup, which is handy in scripts:
+The same handlers run without the popup, which is handy in scripts. Pass a command or its key, then a lane name. Without a name, the command acts on the lane in `LANE_CHECKOUT`. `new` takes a name and an optional base ref.
 
 ```sh
-LANE_REPO_ROOT=/path/to/repo bin/lane-menu merge fix-login
+LANE_REPO_ROOT=/path/to/repo target/release/lane-menu merge fix-login
 ```
+
+Without the popup, `rm` fails when lane refuses and never prompts.
 
 ## Native worktree creation
 
@@ -59,6 +65,7 @@ herdr's Remove worktree still bypasses lane, so remove lanes from the lane menu.
 ## Requirements
 
 - `lane` and `jq` on the herdr server's `PATH`.
+- A Rust toolchain with `cargo`, which builds the menu at install.
 - A filesystem with reflinks (btrfs, XFS, APFS) for lane's warm cache of ignored files.
 - herdr 0.9.0 or later, on Linux or macOS.
 

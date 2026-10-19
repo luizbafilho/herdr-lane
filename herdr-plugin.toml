@@ -1,9 +1,12 @@
 id = "lane"
 name = "Lane"
-version = "0.2.0"
+version = "0.3.0"
 min_herdr_version = "0.9.0"
 description = "Create, open, merge, push and remove lukeed/lane worktrees as linked herdr workspaces from one popup menu, and turn herdr's own new worktrees into lanes."
 platforms = ["linux", "macos"]
+
+[[build]]
+command = ["cargo", "build", "--release", "--locked"]
 
 [[actions]]
 id = "menu"
@@ -17,7 +20,7 @@ title = "Lane"
 placement = "popup"
 width = "70%"
 height = "60%"
-command = ["bash", "-c", "exec \"$HERDR_PLUGIN_ROOT/bin/lane-menu\""]
+command = ["bash", "-c", "exec \"$HERDR_PLUGIN_ROOT/target/release/lane-menu\""]
 
 [[events]]
 on = "worktree.created"
