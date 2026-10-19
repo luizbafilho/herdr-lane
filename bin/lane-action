@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Action `lane.menu`: runs on the herdr server with no TTY, so it only resolves
+# the invoking workspace's repo and hands it to the popup.
+set -uo pipefail
+
+herdr=$HERDR_BIN_PATH
+
+fail() {
+  "$herdr" notification show lane --body "$1" >/dev/null
+  exit 1
+}
+
+command -v jq >/dev/null || fail "jq is not on PATH"
+command -v lane >/dev/null || fail "lane is not on PATH"
+
+worktree=$(jq -c '.worktree // empty' <<<"$HERDR_PLUGIN_CONTEXT_JSON")
+[ -n "$worktree" ] || fail "this workspace is not a git repository"
+
+repo=$(jq -r .repo_root <<<"$worktree")
+checkout=$(jq -r .checkout_path <<<"$worktree")
+
+"$herdr" plugin pane open --plugin lane --entrypoint menu --cwd "$repo" \
+  --env "LANE_REPO_ROOT=$repo" --env "LANE_CHECKOUT=$checkout" --focus >/dev/null ||
+  fail "could not open the lane menu"
