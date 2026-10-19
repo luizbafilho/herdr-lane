@@ -13,11 +13,13 @@ fail() {
 command -v jq >/dev/null || fail "jq is not on PATH"
 command -v lane >/dev/null || fail "lane is not on PATH"
 
-worktree=$(jq -c '.worktree // empty' <<<"$HERDR_PLUGIN_CONTEXT_JSON")
-[ -n "$worktree" ] || fail "this workspace is not a git repository"
-
-repo=$(jq -r .repo_root <<<"$worktree")
-checkout=$(jq -r .checkout_path <<<"$worktree")
+# herdr fills `.worktree` only for workspaces it opened as worktrees, so git
+# resolves the repo from the workspace's directory instead.
+cwd=$(jq -r .workspace_cwd <<<"$HERDR_PLUGIN_CONTEXT_JSON")
+checkout=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null) ||
+  fail "this workspace is not a git repository"
+common=$(git -C "$cwd" rev-parse --path-format=absolute --git-common-dir)
+repo=$(dirname "$common")
 
 "$herdr" plugin pane open --plugin lane --entrypoint menu --cwd "$repo" \
   --env "LANE_REPO_ROOT=$repo" --env "LANE_CHECKOUT=$checkout" --focus >/dev/null ||
