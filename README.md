@@ -48,6 +48,14 @@ The same handlers run without the popup, which is handy in scripts:
 LANE_REPO_ROOT=/path/to/repo bin/lane-menu merge fix-login
 ```
 
+## Native worktree creation
+
+In a repo that ran `lane init`, herdr's own worktree creation makes a lane. That covers the sidebar's new worktree dialog, `prefix+shift+g` and `herdr worktree create`. The plugin listens for `worktree.created`, runs `lane new` on the branch herdr just made, opens the lane under the same label and removes herdr's checkout from `~/.herdr/worktrees`. The branch is kept as is.
+
+Repos without `.lane` keep herdr's native worktrees. The plugin also leaves herdr's checkout in place when it is detached or already has changes. If `lane new` fails, the checkout goes back to its branch and a notification shows lane's error.
+
+herdr's Remove worktree still bypasses lane, so remove lanes from the lane menu.
+
 ## Requirements
 
 - `lane` and `jq` on the herdr server's `PATH`.

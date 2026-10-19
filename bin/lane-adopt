@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Event `worktree.created`: swaps herdr's fresh checkout for a lane on the same
+# branch, in repos that ran `lane init`.
+set -uo pipefail
+
+herdr=$HERDR_BIN_PATH
+
+{
+  read -r workspace_id
+  read -r label
+  read -r focused
+  read -r repo
+  read -r checkout
+  read -r branch
+} < <(jq -r '.data
+  | .workspace.workspace_id, .workspace.label, .workspace.focused,
+    .workspace.worktree.repo_root, .worktree.path, (.worktree.branch // "")' \
+  <<<"$HERDR_PLUGIN_EVENT_JSON")
+
+[ -d "$repo/.lane" ] || exit 0
+[[ $checkout == "$repo/.lane/trees/"* ]] && exit 0
+[ -n "$branch" ] || exit 0
+[ -z "$(git -C "$checkout" status --porcelain)" ] || exit 0
+
+# git refuses to check out a branch another worktree holds, so herdr's checkout
+# lets go of it first and stays intact until the lane exists.
+git -C "$checkout" switch --detach --quiet || exit 1
+
+err=$(mktemp)
+trap 'rm -f "$err"' EXIT
+if ! path=$(cd "$repo" && lane new "$branch" 2>"$err"); then
+  git -C "$checkout" switch --quiet "$branch"
+  "$herdr" notification show lane --body "lane new $branch failed: $(<"$err")" >/dev/null
+  exit 1
+fi
+
+focus=--no-focus
+[ "$focused" = true ] && focus=--focus
+"$herdr" worktree open --cwd "$repo" --path "$path" --label "$label" "$focus" >/dev/null || exit 1
+"$herdr" worktree remove --workspace "$workspace_id" --force >/dev/null
