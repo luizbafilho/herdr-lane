@@ -38,9 +38,9 @@ Move with `j` and `k`, the arrow keys or the mouse. Commands act on the selected
 | --- | --- |
 | `n` | asks for a name and an optional base ref, runs `lane new`, then opens and focuses the workspace |
 | `o` | opens the selected lane when it has no workspace yet, such as one an agent made with `lane new` |
-| `m` | `lane merge`, then closes the lane's workspace and focuses the repo's |
+| `m` | `lane merge`, then closes the lane's workspace. Merging the lane you are in moves you to the repo's workspace first. |
 | `p` | `lane push`, the workspace stays open |
-| `r` | `lane rm`; if lane refuses, asks before `lane rm --force` |
+| `r` | `lane rm`, then closes the lane's workspace. If lane refuses, asks before `lane rm --force`. Removing the lane you are in moves you to the repo's workspace first. |
 | `x` | `lane prune`, then closes workspaces whose worktree is gone |
 | `q`, `Esc` | quit; `Ctrl+C` quits from anywhere |
 

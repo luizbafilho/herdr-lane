@@ -132,10 +132,7 @@ fn open(ctx: &Ctx, lane: &Lane) -> Handled {
 
 fn merge(ctx: &Ctx, lane: &Lane) -> Handled {
     let output = run(ctx.lane(["merge", &lane.name]))?;
-    ctx.close_workspace(lane.workspace.as_deref())?;
-    if let Some(primary) = ctx.primary_workspace()? {
-        ctx.herdr(&["workspace", "focus", &primary])?;
-    }
+    ctx.close_workspace(lane.workspace.as_deref(), &lane.path)?;
     Ok(Outcome { output })
 }
 
@@ -149,13 +146,13 @@ fn push(ctx: &Ctx, lane: &Lane) -> Handled {
 fn rm(ctx: &Ctx, lane: &Lane) -> Handled {
     let output = run(ctx.lane(["rm", &lane.name]))
         .map_err(|failure| Failure::Refused(failure.output().to_owned()))?;
-    ctx.close_workspace(lane.workspace.as_deref())?;
+    ctx.close_workspace(lane.workspace.as_deref(), &lane.path)?;
     Ok(Outcome { output })
 }
 
 pub fn rm_force(ctx: &Ctx, lane: &Lane) -> Handled {
     let output = run(ctx.lane(["rm", &lane.name, "--force"]))?;
-    ctx.close_workspace(lane.workspace.as_deref())?;
+    ctx.close_workspace(lane.workspace.as_deref(), &lane.path)?;
     Ok(Outcome { output })
 }
 
@@ -163,8 +160,11 @@ pub fn rm_force(ctx: &Ctx, lane: &Lane) -> Handled {
 /// once its checkout directory is gone.
 fn prune(ctx: &Ctx) -> Handled {
     let output = run(ctx.lane(["prune"]))?;
-    for id in ctx.stale_workspaces()? {
-        ctx.close_workspace(Some(&id))?;
+    let mut stale = ctx.stale_workspaces()?;
+    // Closing the popup's workspace kills the popup, so it goes last.
+    stale.sort_by_key(|(_, checkout)| ctx.hosts_popup(checkout));
+    for (id, checkout) in stale {
+        ctx.close_workspace(Some(&id), &checkout)?;
     }
     Ok(Outcome { output })
 }

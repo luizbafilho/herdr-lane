@@ -109,28 +109,55 @@ fn open_opens_a_lane_in_a_focused_workspace() {
 }
 
 #[test]
-fn merge_lands_the_lane_closes_its_workspace_and_focuses_the_primary() {
-    let repo = Repo::new();
+fn merge_of_another_lane_closes_its_workspace_without_moving_focus() {
+    let mut repo = Repo::new();
+    repo.new_lane("here");
     repo.new_lane("feat");
     repo.commit_in("feat", "feature.txt");
     repo.set_worktrees(&[(repo.path(), "w-main"), (&repo.lane_path("feat"), "w-feat")]);
-    let lane = repo.find("feat");
+    repo.ctx.current = Some(repo.lane_path("here"));
 
-    on_lane("merge", &repo.ctx, &lane).unwrap();
+    on_lane("merge", &repo.ctx, &repo.find("feat")).unwrap();
 
-    assert!(names(&repo).is_empty());
+    assert_eq!(names(&repo), ["here"]);
     assert!(
         repo.path().join("feature.txt").exists(),
         "main has the lane's commit"
     );
+    assert_eq!(repo.herdr_calls(), ["workspace close w-feat"]);
+}
+
+#[test]
+fn merge_of_the_current_lane_focuses_the_primary_before_closing_its_workspace() {
+    let mut repo = Repo::new();
+    repo.new_lane("feat");
+    repo.commit_in("feat", "feature.txt");
+    repo.set_worktrees(&[(repo.path(), "w-main"), (&repo.lane_path("feat"), "w-feat")]);
+    repo.ctx.current = Some(repo.lane_path("feat"));
+
+    on_lane("merge", &repo.ctx, &repo.find("feat")).unwrap();
+
     assert_eq!(
         repo.herdr_calls(),
-        ["workspace close w-feat", "workspace focus w-main"]
+        ["workspace focus w-main", "workspace close w-feat"]
     );
 }
 
 #[test]
-fn merge_of_a_closed_lane_only_focuses_the_primary() {
+fn merge_of_the_current_lane_without_a_primary_workspace_only_closes() {
+    let mut repo = Repo::new();
+    repo.new_lane("feat");
+    repo.commit_in("feat", "feature.txt");
+    repo.set_worktrees(&[(&repo.lane_path("feat"), "w-feat")]);
+    repo.ctx.current = Some(repo.lane_path("feat"));
+
+    on_lane("merge", &repo.ctx, &repo.find("feat")).unwrap();
+
+    assert_eq!(repo.herdr_calls(), ["workspace close w-feat"]);
+}
+
+#[test]
+fn merge_of_a_closed_lane_makes_no_herdr_calls() {
     let repo = Repo::new();
     repo.new_lane("feat");
     repo.commit_in("feat", "feature.txt");
@@ -138,7 +165,7 @@ fn merge_of_a_closed_lane_only_focuses_the_primary() {
 
     on_lane("m", &repo.ctx, &repo.find("feat")).unwrap();
 
-    assert_eq!(repo.herdr_calls(), ["workspace focus w-main"]);
+    assert!(repo.herdr_calls().is_empty());
 }
 
 #[test]
@@ -174,6 +201,22 @@ fn rm_force_discards_a_refused_lane_and_closes_its_workspace() {
 }
 
 #[test]
+fn rm_force_of_the_current_lane_focuses_the_primary_before_closing_its_workspace() {
+    let mut repo = Repo::new();
+    repo.new_lane("wip");
+    std::fs::write(repo.lane_path("wip").join("README"), "edited\n").unwrap();
+    repo.set_worktrees(&[(repo.path(), "w-main"), (&repo.lane_path("wip"), "w-wip")]);
+    repo.ctx.current = Some(repo.lane_path("wip"));
+
+    verb::rm_force(&repo.ctx, &repo.find("wip")).unwrap();
+
+    assert_eq!(
+        repo.herdr_calls(),
+        ["workspace focus w-main", "workspace close w-wip"]
+    );
+}
+
+#[test]
 fn rm_removes_a_clean_lane_and_closes_its_workspace() {
     let repo = Repo::new();
     repo.new_lane("done");
@@ -183,6 +226,21 @@ fn rm_removes_a_clean_lane_and_closes_its_workspace() {
 
     assert!(names(&repo).is_empty());
     assert_eq!(repo.herdr_calls(), ["workspace close w-done"]);
+}
+
+#[test]
+fn rm_of_the_current_lane_focuses_the_primary_before_closing_its_workspace() {
+    let mut repo = Repo::new();
+    repo.new_lane("done");
+    repo.set_worktrees(&[(repo.path(), "w-main"), (&repo.lane_path("done"), "w-done")]);
+    repo.ctx.current = Some(repo.lane_path("done"));
+
+    on_lane("rm", &repo.ctx, &repo.find("done")).unwrap();
+
+    assert_eq!(
+        repo.herdr_calls(),
+        ["workspace focus w-main", "workspace close w-done"]
+    );
 }
 
 #[test]
@@ -226,4 +284,30 @@ fn prune_closes_only_this_repos_workspaces_whose_checkout_is_gone() {
 
     assert_eq!(names(&repo), ["ongoing"]);
     assert_eq!(repo.herdr_calls(), ["workspace close w-landed"]);
+}
+
+#[test]
+fn prune_closes_the_current_lanes_workspace_last_after_focusing_the_primary() {
+    let mut repo = Repo::new();
+    repo.set_worktrees(&[(repo.path(), "w-main")]);
+    repo.set_workspaces(&[
+        ("w-main", repo.path(), repo.path()),
+        ("w-current", repo.path(), &repo.lane_path("current")),
+        ("w-other", repo.path(), &repo.lane_path("other")),
+    ]);
+    repo.ctx.current = Some(repo.lane_path("current"));
+    let Target::None(prune) = verb::find("prune").unwrap().target else {
+        panic!("prune takes no lane");
+    };
+
+    prune(&repo.ctx).unwrap();
+
+    assert_eq!(
+        repo.herdr_calls(),
+        [
+            "workspace close w-other",
+            "workspace focus w-main",
+            "workspace close w-current"
+        ]
+    );
 }

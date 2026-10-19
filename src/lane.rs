@@ -99,7 +99,12 @@ impl Ctx {
     }
 
     pub fn is_current(&self, lane: &Lane) -> bool {
-        self.current.as_deref() == Some(lane.path.as_path())
+        self.hosts_popup(&lane.path)
+    }
+
+    /// The popup belongs to the workspace on `LANE_CHECKOUT`.
+    pub fn hosts_popup(&self, checkout: &Path) -> bool {
+        self.current.as_deref() == Some(checkout)
     }
 
     pub fn repo_name(&self) -> String {
@@ -131,11 +136,17 @@ impl Ctx {
         }
     }
 
-    pub fn close_workspace(&self, id: Option<&str>) -> Result<(), Failure> {
-        if let Some(id) = id {
-            self.herdr(&["workspace", "close", id])?;
+    /// Closes the workspace `id` open on `checkout`. Closing the popup's own
+    /// workspace kills the popup, so that close focuses the primary first and
+    /// must be the caller's last herdr call.
+    pub fn close_workspace(&self, id: Option<&str>, checkout: &Path) -> Result<(), Failure> {
+        let Some(id) = id else { return Ok(()) };
+        if self.hosts_popup(checkout)
+            && let Some(primary) = self.primary_workspace()?
+        {
+            self.herdr(&["workspace", "focus", &primary])?;
         }
-        Ok(())
+        self.herdr(&["workspace", "close", id]).map(drop)
     }
 
     pub fn open_workspace(&self, path: &Path, label: &str) -> Result<(), Failure> {
@@ -169,22 +180,22 @@ impl Ctx {
             .and_then(|worktree| worktree.open_workspace_id))
     }
 
-    /// Workspaces on this repo's linked worktrees whose checkout no longer exists.
-    pub fn stale_workspaces(&self) -> Result<Vec<String>, Failure> {
+    /// Workspaces on this repo's linked worktrees whose checkout no longer
+    /// exists, as `(workspace id, checkout path)`.
+    pub fn stale_workspaces(&self) -> Result<Vec<(String, PathBuf)>, Failure> {
         let json = self.herdr(&["workspace", "list"])?;
         let list = parse::<Reply<WorkspaceList>>("herdr workspace list", &json)?;
         Ok(list
             .result
             .workspaces
             .into_iter()
-            .filter(|workspace| {
-                workspace.worktree.as_ref().is_some_and(|worktree| {
-                    worktree.repo_root == self.repo
-                        && worktree.is_linked_worktree
-                        && !worktree.checkout_path.exists()
-                })
+            .filter_map(|workspace| {
+                let worktree = workspace.worktree?;
+                (worktree.repo_root == self.repo
+                    && worktree.is_linked_worktree
+                    && !worktree.checkout_path.exists())
+                .then_some((workspace.workspace_id, worktree.checkout_path))
             })
-            .map(|workspace| workspace.workspace_id)
             .collect())
     }
 
