@@ -1,0 +1,191 @@
+#!/usr/bin/env bash
+# Pane `lane.menu`. With no arguments it is the popup's key loop; with a verb
+# (`lane-menu merge fix-login`) it runs that one handler, for scripts and tests.
+set -uo pipefail
+
+herdr=${HERDR_BIN_PATH:-herdr}
+repo=${LANE_REPO_ROOT:?LANE_REPO_ROOT is not set}
+current=${LANE_CHECKOUT:-}
+cd "$repo" || exit 1
+
+# key, verb, what to do after the handler succeeds, label
+MENU=(
+  "n new exit new lane"
+  "o open exit open a lane in herdr"
+  "m merge stay merge a lane"
+  "p push stay push a lane"
+  "r rm stay remove a lane"
+  "x prune stay prune landed lanes"
+  "q quit exit quit"
+)
+
+# One row per lane, tab separated: name path branch state dirty pending workspace_id.
+# workspace_id is last because bash read collapses empty tab-separated fields.
+lanes() {
+  local ls wt
+  ls=$(lane ls --json) || return 1
+  wt=$("$herdr" worktree list --cwd "$repo") || return 1
+  jq -rn --argjson ls "$ls" --argjson wt "$wt" '
+    ($wt.result.worktrees | map({(.path): (.open_workspace_id // "")}) | add) as $ws
+    | $ls[]
+    | [.name, .path, .branch, .state, (if .dirty then "dirty" else "clean" end),
+       (.pending_notes | tostring), ($ws[.path] // "")]
+    | @tsv'
+}
+
+print_rows() {
+  local i=0 name path branch state dirty pending ws here open
+  while IFS=$'\t' read -r name path branch state dirty pending ws; do
+    i=$((i + 1))
+    here=" " open=" "
+    [ "$path" = "$current" ] && here=">"
+    [ -n "$ws" ] && open="*"
+    printf ' %s%s %2d  %-24s %-24s %-8s %-6s %s note(s)\n' \
+      "$here" "$open" "$i" "$name" "$branch" "$state" "$dirty" "$pending"
+  done <<<"$1"
+}
+
+# Sets T_NAME, T_PATH and T_WS. $1 is "all" or "closed" (lanes with no herdr
+# workspace); $2 is a lane name from the command line, which skips the prompt.
+pick_target() {
+  local filter=$1 given=${2:-} rows row n
+  rows=$(lanes | awk -F'\t' -v f="$filter" 'f == "all" || $7 == ""') || return 1
+  if [ -z "$rows" ]; then
+    echo "no lanes to choose from"
+    return 1
+  fi
+  if [ -n "$given" ]; then
+    row=$(awk -F'\t' -v n="$given" '$1 == n' <<<"$rows")
+  else
+    row=$(awk -F'\t' -v p="$current" '$2 == p' <<<"$rows")
+  fi
+  if [ -z "$row" ] && [ -n "$given" ]; then
+    echo "no such lane: $given"
+    return 1
+  fi
+  if [ -z "$row" ]; then
+    print_rows "$rows"
+    read -rp "lane #: " n
+    [[ $n =~ ^[0-9]+$ ]] && row=$(sed -n "${n}p" <<<"$rows")
+    [ -n "$row" ] || return 1
+  fi
+  IFS=$'\t' read -r T_NAME T_PATH _ _ _ _ T_WS <<<"$row"
+  echo "lane: $T_NAME"
+}
+
+close_workspace() {
+  [ -z "$1" ] || "$herdr" workspace close "$1" >/dev/null
+}
+
+do_new() {
+  local name=${1:-} base=${2:-} path
+  if [ $# -eq 0 ]; then
+    read -rp "name: " name
+    read -rp "base ref (empty for default): " base
+  fi
+  if [ -z "$name" ]; then
+    echo "a lane name is required"
+    return 1
+  fi
+  path=$(lane new "$name" ${base:+--base "$base"}) || return 1
+  "$herdr" worktree open --cwd "$repo" --path "$path" --label "$name" --focus >/dev/null
+}
+
+do_open() {
+  pick_target closed "${1:-}" || return 1
+  "$herdr" worktree open --cwd "$repo" --path "$T_PATH" --label "$T_NAME" --focus >/dev/null
+}
+
+do_merge() {
+  local primary
+  pick_target all "${1:-}" || return 1
+  lane merge "$T_NAME" || return 1
+  close_workspace "$T_WS"
+  primary=$("$herdr" worktree list --cwd "$repo" |
+    jq -r '.result.worktrees[] | select(.is_linked_worktree | not) | .open_workspace_id // empty')
+  [ -z "$primary" ] || "$herdr" workspace focus "$primary" >/dev/null
+}
+
+do_push() {
+  pick_target all "${1:-}" || return 1
+  lane push "$T_NAME"
+}
+
+do_rm() {
+  local answer
+  pick_target all "${1:-}" || return 1
+  if ! lane rm "$T_NAME"; then
+    read -rp "discard anyway? [y/N] " answer
+    [[ $answer == [yY] ]] || return 0
+    lane rm "$T_NAME" --force || return 1
+  fi
+  close_workspace "$T_WS"
+}
+
+# lane prune reports no paths, so a workspace is stale once its checkout is gone.
+do_prune() {
+  local id path
+  lane prune || return 1
+  "$herdr" workspace list |
+    jq -r --arg repo "$repo" '.result.workspaces[]
+      | select(.worktree.repo_root == $repo and .worktree.is_linked_worktree)
+      | [.workspace_id, .worktree.checkout_path] | @tsv' |
+    while IFS=$'\t' read -r id path; do
+      [ -d "$path" ] || close_workspace "$id"
+    done
+}
+
+do_quit() { :; }
+
+# Sets M_VERB and M_THEN from a key or a verb.
+lookup() {
+  local entry key verb after label
+  for entry in "${MENU[@]}"; do
+    read -r key verb after label <<<"$entry"
+    if [ "$1" = "$key" ] || [ "$1" = "$verb" ]; then
+      M_VERB=$verb M_THEN=$after
+      return 0
+    fi
+  done
+  return 1
+}
+
+render() {
+  local rows entry key verb after label
+  clear
+  printf 'lane: %s\n\n' "${repo##*/}"
+  if rows=$(lanes); then
+    if [ -n "$rows" ]; then print_rows "$rows"; else echo " no lanes yet"; fi
+  fi
+  printf '\n  > current   * open in herdr\n\n'
+  for entry in "${MENU[@]}"; do
+    read -r key verb after label <<<"$entry"
+    printf ' %s  %s\n' "$key" "$label"
+  done
+}
+
+pause() {
+  read -rp $'\npress Enter to return to the menu ' _
+}
+
+if [ $# -gt 0 ]; then
+  lookup "$1" || {
+    echo "unknown command: $1" >&2
+    exit 2
+  }
+  shift
+  "do_$M_VERB" "$@"
+  exit
+fi
+
+while true; do
+  render
+  read -rsn1 key
+  [ "$key" = $'\e' ] && key=q
+  lookup "$key" || continue
+  echo
+  if "do_$M_VERB" && [ "$M_THEN" = exit ]; then
+    exit 0
+  fi
+  pause
+done
